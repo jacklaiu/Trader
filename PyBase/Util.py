@@ -4,6 +4,38 @@ import time
 import datetime
 import json
 import jqdatasdk
+from funcat import *
+
+def adx(highs, lows, closes):
+    M1, M2 = 14, 6
+    TR = SUM(MAX(MAX(highs - lows, ABS(HIGH - REF(closes, 1))), ABS(lows - REF(closes, 1))), M1)
+    HD = HIGH - REF(HIGH, 1)
+    LD = REF(LOW, 1) - LOW
+    DMP = SUM(IF((HD > 0) & (HD > LD), HD, 0), M1)
+    DMM = SUM(IF((LD > 0) & (LD > HD), LD, 0), M1)
+    DI1 = DMP * 100 / TR
+    DI2 = DMM * 100 / TR
+    ADX = MA(ABS(DI2 - DI1) / (DI1 + DI2) * 100, M2)
+    return ADX
+    # i = 0
+    # M1, M2 = 14, 6
+    # adxs = []
+    # while i < closes.__len__():
+    #     CLOSE = closes[i]
+    #     HIGH = highs[i]
+    #     LOW = lows[i]
+    #     TR = SUM(MAX(MAX(HIGH - LOW, ABS(HIGH - REF(CLOSE, 1))), ABS(LOW - REF(CLOSE, 1))), M1)
+    #     HD = HIGH - REF(HIGH, 1)
+    #     LD = REF(LOW, 1) - LOW
+    #     DMP = SUM(IF((HD > 0) & (HD > LD), HD, 0), M1)
+    #     DMM = SUM(IF((LD > 0) & (LD > HD), LD, 0), M1)
+    #     DI1 = DMP * 100 / TR
+    #     DI2 = DMM * 100 / TR
+    #     ADX = MA(ABS(DI2 - DI1) / (DI1 + DI2) * 100, M2)
+    #     # ADXR = (ADX + REF(ADX, M2)) / 2
+    #     adxs.append(ADX)
+    #     i = i + 1
+    # return adxs
 
 def clearProperties():
     f = open('properties.txt', 'w')
