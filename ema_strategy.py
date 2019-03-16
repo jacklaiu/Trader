@@ -13,7 +13,7 @@ import jqdatasdk
 import numpy as np
 import PyBase.Util as util
 import time
-
+from functools import reduce
 
 def getAdvancedData(df, security, frequency, nowTimeString):
     newRow = None
@@ -286,77 +286,148 @@ def changeFromNowCount(df):
         i = i - 1
     return count
 
+def mutil(x, y):
+    return x * y
 
 def loop(security=None, frequency=None, nowTimeString=None, msg=None):
     df = msg.get('df')
     position = msg.get('position')
     force_waiting_count = msg.get('force_waiting_count')
+    open = msg.get('open')
+    clearRates = msg.get('clearRates')
+    open_after_next_change = msg.get('open_after_next_change')
 
     df = getAdvancedData(df, security=security, frequency=frequency, nowTimeString=nowTimeString)
     if force_waiting_count > 0:
         force_waiting_count = force_waiting_count - 1
         print(nowTimeString + ": ForceWaiting...")
-        return {'df': df, 'position': position, 'force_waiting_count': force_waiting_count}
+        return {
+            'df': df,
+            'position': position,
+            'force_waiting_count': force_waiting_count,
+            'open': open,
+            'clearRates': clearRates,
+            'open_after_next_change': open_after_next_change
+        }
 
     status = isChangeTo(df)
     ADXs = [float(x) for x in df[df.ADX == df.ADX]['ADX']][-200:]
     cfn_count = changeFromNowCount(df)
     closes = [float(x) for x in df['close']]
     dangerRate = getDangerRate(df)  # dangerRate的容忍度应该由earningRate决定，两个是正相关。能容忍利润做筹码，厌恶本金损失
-    earningRate = getNowEarningRate(df)
-    pre_dangerRate = getDangerRate(df, preCount=1)
-    pre_earningRate = getNowEarningRate(df, preCount=1)
+    earningRate = 0
+    pricePosis = getPricePosiArray(df)
+    pricePosi = pricePosis[-1]
+    if open != 0:
+        if pricePosis[-2] == 0:
+            earningRate = util.getRate(open, closes[-1])
+        else:
+            earningRate = util.getRate(closes[-1], open)
+
+    # 趋势持续
     if status == 'STILL':
+        # 止损止盈平仓
         if position != 0 and (
-                (earningRate <= 0.6 and dangerRate < -0.5) or (earningRate > 0.6 and dangerRate < -0.6)
+                (earningRate <= 0.6 and dangerRate < -0.5) or
+                (earningRate > 0.6 and dangerRate < -0.6) or
+                (ADXs[-1] < 25)
         ):
-            print(nowTimeString + ':' + str(closes[-1]) + ' clear Position -> ' + str(earningRate) + " pdr:" + str(
-                pre_dangerRate) + " per:" + str(pre_earningRate))
             position = 0
+            clearRates.append(round((1 + earningRate / 100), 4))
+            print(nowTimeString + ':' + str(closes[-1]) + ' clear Position -> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
+            open = 0
+            open_after_next_change = True
             # pushPosition(0)
         else:
+            # 高位回落卖出后再此处等待，或瞬间变化时ADX条件不符合正在等待机会
+            if position == 0:
+                if open_after_next_change is not True:
+                    # 等到adx条件符合，开空仓
+                    if pricePosi == 1 and (ADXs[-1] > 31 and cfn_count < 10):
+                        print(nowTimeString + ':' + str(closes[-1]) + ' Down Position' + ' adx:' + str(ADXs[-1]))
+                        position = -1
+                        open = closes[-1]
+                    # 等到adx条件符合，开多仓
+                    if pricePosi == 0 and (ADXs[-1] > 31 and cfn_count < 10):
+                        print(nowTimeString + ':' + str(closes[-1]) + ' Up Position' + ' adx:' + str(ADXs[-1]))
+                        position = 1
+                        open = closes[-1]
+                else:
+                    print(nowTimeString + ':' + " WAITING...")
+            # 持有多仓
             if position > 0:
                 print(nowTimeString + ':' + " Still Holding DUO..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
-            elif position < 0:
+            # 持有空仓
+            if position < 0:
                 print(nowTimeString + ':' + " Still Holding KON..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
-            else:
-                print(nowTimeString + ':' + " WAITING...")
 
+
+    # 瞬间 Down
     elif status == 'DOWN':
+        # 前个趋势还在持仓，而现在趋势反转，应该反手做空
         if position != 0:
-            print(nowTimeString + ':' + str(closes[-1]) + ' clear Position -> ' + str(earningRate) + " pdr:" + str(
-                pre_dangerRate) + " per:" + str(pre_earningRate))
             position = 0
-            force_waiting_count = 10
-            return {'df': df, 'position': position, 'force_waiting_count': force_waiting_count}
+            clearRates.append(round((1 + earningRate / 100), 4))
+            print(nowTimeString + ': clear Position ------> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
+            if ADXs[-1] < 31: force_waiting_count = 5
+            open = 0
         # -------------------------------------------------------------------
-        if (ADXs[-1] > 25 and cfn_count < 10) and position == 0:
+        # 变为Down瞬间，adx也符合要求，开空仓
+        elif (ADXs[-1] > 31 and cfn_count < 10) and position == 0:
             print(nowTimeString + ':' + str(closes[-1]) + ' Down Position' + ' adx:' + str(ADXs[-1]))
             position = -1
+            open = closes[-1]
         # pushPosition(1)
-    else:
+        open_after_next_change = False
+
+
+    # 瞬间 Up
+    elif status == 'UP':
+        # 前个趋势还在持仓，而现在趋势反转，应该反手做多
         if position != 0:
-            print(nowTimeString + ':' + str(closes[-1]) + ' clear Position -> ' + str(earningRate) + " pdr:" + str(
-                pre_dangerRate) + " per:" + str(pre_earningRate))
             position = 0
-            force_waiting_count = 10
-            return {'df': df, 'position': position, 'force_waiting_count':force_waiting_count}
+            clearRates.append(round((1 + earningRate / 100), 4))
+            print(nowTimeString + ': clear Position ------> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
+            if ADXs[-1] < 30: force_waiting_count = 5
+            open = 0
+            if earningRate > 2:
+                print()
         # -------------------------------------------------------------------
-        if (ADXs[-1] > 25 and cfn_count < 10) and position == 0:
+        # 变为Up瞬间，adx也符合要求，开多仓
+        elif (ADXs[-1] > 31 and cfn_count < 10) and position == 0:
             print(nowTimeString + ':' + str(closes[-1]) + ' Up Position' + ' adx:' + str(ADXs[-1]))
             position = 1
+            open = closes[-1]
+        open_after_next_change = False
+
         # pushPosition(-1)
-    return {'df': df, 'position': position, 'force_waiting_count': 0}
+    return {
+        'df': df,
+        'position': position,
+        'force_waiting_count': force_waiting_count,
+        'open': open,
+        'clearRates': clearRates,
+        'open_after_next_change': open_after_next_change
+    }
 
 
+timeArr = util.getTimeSerial(starttime='2019-01-02 11:20:00', count=200000, periodSec=61)
 df = None
-security = 'RB8888.XSGE'
+security = 'BU8888.XSGE'
 frequency = '10m'
-now_position = 0
-force_waiting_count = 0
-timeArr = util.getTimeSerial(starttime='2019-02-28 11:20:00', count=20000, periodSec=61)
+msg = {
+    'df': df,
+    'position': 0,
+    'force_waiting_count': 0,
+    'open': 0,
+    'clearRates': [],
+    'open_after_next_change': True
+}
 for nowTimeString in timeArr:
     ts = util.string2timestamp(str(nowTimeString))
     frequencyLimitFlag = int(time.strftime('%M', time.localtime(ts))) % int(frequency[0:-1]) == 0
@@ -365,11 +436,7 @@ for nowTimeString in timeArr:
     if util.isFutureTradingTime(nowTimeString=nowTimeString) is False or util.isFutureCommonTradingTime(
             nowTimeString=nowTimeString) is False:
         continue
-    msg = {'df': df, 'position': now_position, 'force_waiting_count': force_waiting_count}
-    ret = loop(security=security, frequency=frequency, nowTimeString=nowTimeString, msg=msg)
-    now_position = ret.get('position')
-    df = ret.get('df')
-    force_waiting_count = ret.get('force_waiting_count')
+    msg = loop(security=security, frequency=frequency, nowTimeString=nowTimeString, msg=msg)
 
 # df = None
 # loop(df=df, security='TA8888.XZCE')
