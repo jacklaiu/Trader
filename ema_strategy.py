@@ -15,17 +15,34 @@ import PyBase.Util as util
 import time
 from functools import reduce
 
+cond_er = 0.4
+cond_before_er = 0.4
+cond_after_er = 0.6
+timeArr = util.getTimeSerial(starttime='2018-07-24 11:20:00', count=2000000, periodSec=61)
+df = None
+security = 'BU8888.XSGE'
+frequency = '10m'
+msg = {
+    'df': df,
+    'position': 0,
+    'force_waiting_count': 0,
+    'open': 0,
+    'clearRates': [],
+    'open_after_next_change': True,
+    'bar_rates': []
+}
 def getAdvancedData(df, security, frequency, nowTimeString):
     newRow = None
     newIndex = None
-    jqdatasdk.auth('13268108673', 'king20110713')
+    # jqdatasdk.auth('13268108673', 'king20110713')
+    jqdatasdk.auth('13824472562', '472562')
     if df is None:
         df = jqdatasdk.get_price(
             security=security,
             count=500,
             end_date=nowTimeString[0:nowTimeString.rindex(':') + 1] + '30',
             frequency=frequency,
-            fields=['close', 'open', 'volume', 'high', 'low', 'money']
+            fields=['close', 'open', 'volume', 'high', 'low']
         )
     else:
         newDf = jqdatasdk.get_price(
@@ -33,7 +50,7 @@ def getAdvancedData(df, security, frequency, nowTimeString):
             count=1,
             end_date=nowTimeString[0:nowTimeString.rindex(':') + 1] + '30',
             frequency=frequency,
-            fields=['close', 'open', 'volume', 'high', 'low', 'money']
+            fields=['close', 'open', 'volume', 'high', 'low']
         )
         newIndex = newDf.index.tolist()[0]
         newRow = newDf.loc[newIndex]
@@ -47,7 +64,7 @@ def getAdvancedData(df, security, frequency, nowTimeString):
     df['EMA20'] = talib.EMA(np.array(close), timeperiod=20)
     df['EMA40'] = talib.EMA(np.array(close), timeperiod=40)
     df['EMA60'] = talib.EMA(np.array(close), timeperiod=60)
-    df['EMA7'] = talib.EMA(np.array(close), timeperiod=7)
+    df['EMA6'] = talib.EMA(np.array(close), timeperiod=7)
     df['EMA23'] = talib.EMA(np.array(close), timeperiod=23)
     df['ADX'] = talib.ADX(np.array(high), np.array(low), np.array(close), timeperiod=6)
     #df['ADX'] = util.adx(highs=np.array(high), lows=np.array(low), closes=np.array(close))
@@ -59,14 +76,14 @@ def getPricePosiArray(df):
     indexList = df[df.EMA60 == df.EMA60].index.tolist()
     pricePositions = []
     for index in indexList:
-        ema7 = df.loc[index, 'EMA7']
+        ema6 = df.loc[index, 'EMA6']
         emas = sorted(
             # [ema5, df.loc[index, 'EMA10'], df.loc[index, 'EMA20'], df.loc[index, 'EMA40'], df.loc[index, 'EMA60']],
-            [ema7, df.loc[index, 'EMA23']],
+            [ema6, df.loc[index, 'EMA23']],
             reverse=True)
         pricePosi = 0
         for ema in emas:
-            if ema == ema7:
+            if ema == ema6:
                 break
             pricePosi = pricePosi + 1
         pricePositions.append(pricePosi)
@@ -114,31 +131,6 @@ def getOpen2CloseRates(df):
         i = i + 1
         arr.append(rate)
     return arr
-
-
-def getAvgOpen2CloseRates(df):
-    rates = getOpen2CloseRates(df)
-    i = 0
-    arr = []
-    while i < rates.__len__():
-        arr.append(round(np.mean(rates[0:i + 1]), 4))
-        i = i + 1
-    return arr
-
-
-def getSameStateTimes():
-    pricePositions = getPricePosiArray(df)
-    i = 0
-    count = 0
-    pre = None
-    while i < pricePositions.__len__():
-        pp = pricePositions[i]
-        if pre is None or pre == pp:
-            count = count + 1
-        else:
-            count = 0
-        i = i + 1
-
 
 def getNearMaxClosePrice(df=None, preCount=0):
     pricePositions = getPricePosiArray(df)
@@ -250,8 +242,9 @@ def getNowPosition():
 
 
 def isChangeTo(df):
-    nowPricePosi = getPricePosiArray(df)[-1]
-    prePricePosi = getPricePosiArray(df)[-2]
+    pps = getPricePosiArray(df)
+    nowPricePosi = pps[-1]
+    prePricePosi = pps[-2]
     if nowPricePosi != prePricePosi and nowPricePosi == 0:
         return "UP"
     elif nowPricePosi != prePricePosi and nowPricePosi == 1:
@@ -261,8 +254,9 @@ def isChangeTo(df):
 
 
 def isChangeToDOWN(df):
-    nowPricePosi = getPricePosiArray(df)[-1]
-    prePricePosi = getPricePosiArray(df)[-2]
+    pps = getPricePosiArray(df)
+    nowPricePosi = pps[-1]
+    prePricePosi = pps[-2]
     if nowPricePosi != prePricePosi and nowPricePosi == 1:
         return True
     else:
@@ -270,8 +264,8 @@ def isChangeToDOWN(df):
 
 
 def changeFromNowCount(df):
-    pricePositions = getPricePosiArray(df)
-    pricePositions = pricePositions[-200:]
+    pps = getPricePosiArray(df)
+    pricePositions = pps[-200:]
     pre = None
     i = pricePositions.__len__() - 1
     count = 0
@@ -286,18 +280,22 @@ def changeFromNowCount(df):
         i = i - 1
     return count
 
-def mutil(x, y):
-    return x * y
-
 def loop(security=None, frequency=None, nowTimeString=None, msg=None):
+
     df = msg.get('df')
     position = msg.get('position')
     force_waiting_count = msg.get('force_waiting_count')
     open = msg.get('open')
     clearRates = msg.get('clearRates')
     open_after_next_change = msg.get('open_after_next_change')
+    bar_rates = msg.get('bar_rates')
 
     df = getAdvancedData(df, security=security, frequency=frequency, nowTimeString=nowTimeString)
+
+    closes = [float(x) for x in df['close']]
+    opens = [float(x) for x in df['open']]
+    bar_rate = util.getRate(fromPrice=opens[-1], toPrice=closes[-1])
+    bar_rates.append(bar_rate)
     if force_waiting_count > 0:
         force_waiting_count = force_waiting_count - 1
         print(nowTimeString + ": ForceWaiting...")
@@ -307,13 +305,13 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             'force_waiting_count': force_waiting_count,
             'open': open,
             'clearRates': clearRates,
-            'open_after_next_change': open_after_next_change
+            'open_after_next_change': open_after_next_change,
+            'bar_rates': bar_rates
         }
 
     status = isChangeTo(df)
     ADXs = [float(x) for x in df[df.ADX == df.ADX]['ADX']][-200:]
     cfn_count = changeFromNowCount(df)
-    closes = [float(x) for x in df['close']]
     dangerRate = getDangerRate(df)  # dangerRate的容忍度应该由earningRate决定，两个是正相关。能容忍利润做筹码，厌恶本金损失
     earningRate = 0
     pricePosis = getPricePosiArray(df)
@@ -324,13 +322,13 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         else:
             earningRate = util.getRate(closes[-1], open)
 
+
     # 趋势持续
     if status == 'STILL':
         # 止损止盈平仓
         if position != 0 and (
-                (earningRate <= 0.6 and dangerRate < -0.5) or
-                (earningRate > 0.6 and dangerRate < -0.6) or
-                (ADXs[-1] < 25)
+                (earningRate <= cond_er and dangerRate < -cond_before_er) or
+                (earningRate > cond_er and dangerRate < -cond_after_er)
         ):
             position = 0
             clearRates.append(round((1 + earningRate / 100), 4))
@@ -344,17 +342,17 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             if position == 0:
                 if open_after_next_change is not True:
                     # 等到adx条件符合，开空仓
-                    if pricePosi == 1 and (ADXs[-1] > 31 and cfn_count < 10):
+                    if pricePosi == 1 and (ADXs[-1] > 31):
                         print(nowTimeString + ':' + str(closes[-1]) + ' Down Position' + ' adx:' + str(ADXs[-1]))
                         position = -1
                         open = closes[-1]
                     # 等到adx条件符合，开多仓
-                    if pricePosi == 0 and (ADXs[-1] > 31 and cfn_count < 10):
+                    if pricePosi == 0 and (ADXs[-1] > 31):
                         print(nowTimeString + ':' + str(closes[-1]) + ' Up Position' + ' adx:' + str(ADXs[-1]))
                         position = 1
                         open = closes[-1]
                 else:
-                    print(nowTimeString + ':' + " WAITING...")
+                    print(nowTimeString + ':' + " WAITING..." + ' adx: ' + str(ADXs[-1]))
             # 持有多仓
             if position > 0:
                 print(nowTimeString + ':' + " Still Holding DUO..." + " dr:" + str(dangerRate) + ' er:' + str(
@@ -404,30 +402,19 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             position = 1
             open = closes[-1]
         open_after_next_change = False
-
         # pushPosition(-1)
+    if clearRates.__len__() > 500:
+        clearRates.pop(0)
     return {
         'df': df,
         'position': position,
         'force_waiting_count': force_waiting_count,
         'open': open,
         'clearRates': clearRates,
-        'open_after_next_change': open_after_next_change
+        'open_after_next_change': open_after_next_change,
+        'bar_rates': bar_rates
     }
 
-
-timeArr = util.getTimeSerial(starttime='2019-01-02 11:20:00', count=200000, periodSec=61)
-df = None
-security = 'BU8888.XSGE'
-frequency = '10m'
-msg = {
-    'df': df,
-    'position': 0,
-    'force_waiting_count': 0,
-    'open': 0,
-    'clearRates': [],
-    'open_after_next_change': True
-}
 for nowTimeString in timeArr:
     ts = util.string2timestamp(str(nowTimeString))
     frequencyLimitFlag = int(time.strftime('%M', time.localtime(ts))) % int(frequency[0:-1]) == 0
