@@ -1,41 +1,15 @@
 #coding: utf-8
 import tushare as ts
 import time
-import datetime
 import json
 import jqdatasdk
-from funcat import *
+import datetime
+from chinese_calendar import is_workday #, is_holiday
 
-def adx(highs, lows, closes):
-    M1, M2 = 14, 6
-    TR = SUM(MAX(MAX(highs - lows, ABS(HIGH - REF(closes, 1))), ABS(lows - REF(closes, 1))), M1)
-    HD = HIGH - REF(HIGH, 1)
-    LD = REF(LOW, 1) - LOW
-    DMP = SUM(IF((HD > 0) & (HD > LD), HD, 0), M1)
-    DMM = SUM(IF((LD > 0) & (LD > HD), LD, 0), M1)
-    DI1 = DMP * 100 / TR
-    DI2 = DMM * 100 / TR
-    ADX = MA(ABS(DI2 - DI1) / (DI1 + DI2) * 100, M2)
-    return ADX
-    # i = 0
-    # M1, M2 = 14, 6
-    # adxs = []
-    # while i < closes.__len__():
-    #     CLOSE = closes[i]
-    #     HIGH = highs[i]
-    #     LOW = lows[i]
-    #     TR = SUM(MAX(MAX(HIGH - LOW, ABS(HIGH - REF(CLOSE, 1))), ABS(LOW - REF(CLOSE, 1))), M1)
-    #     HD = HIGH - REF(HIGH, 1)
-    #     LD = REF(LOW, 1) - LOW
-    #     DMP = SUM(IF((HD > 0) & (HD > LD), HD, 0), M1)
-    #     DMM = SUM(IF((LD > 0) & (LD > HD), LD, 0), M1)
-    #     DI1 = DMP * 100 / TR
-    #     DI2 = DMM * 100 / TR
-    #     ADX = MA(ABS(DI2 - DI1) / (DI1 + DI2) * 100, M2)
-    #     # ADXR = (ADX + REF(ADX, M2)) / 2
-    #     adxs.append(ADX)
-    #     i = i + 1
-    # return adxs
+#没有夜盘
+str_no_night = 'jd_ap'
+#23:00就收市
+str_no_2330 = 'rb'
 
 def clearProperties():
     f = open('properties.txt', 'w')
@@ -104,27 +78,99 @@ def futureName(security):
     else:
         return ret
 
+def shouldClearPositionNow(nowTimeString=None, security=None):
+    now = datetime.datetime.strptime(nowTimeString, "%Y-%m-%d %H:%M:%S")
+    # 判断是否大于2日的假期，因为大于2日的假期，最后一天晚上交易所下班了
+    isTorrowLongHoildayBegin = False
+    count = 0
+    while count < 3:
+        date = now + datetime.timedelta(days=1)
+        if is_workday(date) is True:
+            break
+        if count == 2:
+            isTorrowLongHoildayBegin = True
+        count = count + 1
+
+    pre = None
+    if security is not None:
+        pre = security[0:2].lower()
+    str = (now + datetime.timedelta(minutes=2)).strftime("%H:%M")
+
+    if isTorrowLongHoildayBegin is True and str == '15:00':
+        return True
+    if pre in str_no_night and str == '15:00':
+        return True
+    if pre in str_no_2330 and str == '23:00':
+        return True
+    if str == '23:30':
+        return True
+    return False
+
+def shouldResetPositionNow(security=None):
+    str = (datetime.datetime.now() + datetime.timedelta(minutes=2)).strftime("%H:%M")
+    if str == '09:01':
+        return True
+    return False
+
 # 公用期货日内交易时间
-def isFutureCommonTradingTime(nowTimeString):
-    hms = nowTimeString
-    if nowTimeString.__len__() > 10:
-        hms = nowTimeString[11:nowTimeString.__len__()]
-    s0 = '09:00:00'
+def isFutureCommonTradingTime(nowTimeString=None, security=None):
+    s0 = '09:05:00'
     e0 = '10:15:00'
     s1 = '10:30:00'
     e1 = '11:30:00'
-    s2 = '13:30:00'
+    s2 = '13:35:00'
     e2 = '15:00:00'
-    s3 = '21:00:00'
+    s3 = '21:05:00'
     e3 = '23:30:00'
-    if hms > s0 and hms < e0:
-        return True
-    if hms > s1 and hms < e1:
-        return True
-    if hms > s2 and hms < e2:
-        return True
-    if hms > s3 and hms < e3:
-        return True
+    hms = nowTimeString
+    date = None
+    isTorrowLongHoildayBegin = False
+    if nowTimeString.__len__() > 10:
+        datestr = nowTimeString[0:10]
+        datestrs = datestr.split('-')
+        date = datetime.date(int(datestrs[0]), int(datestrs[1]), int(datestrs[2]))
+        hms = nowTimeString[11:nowTimeString.__len__()]
+    
+    if date is not None:
+        # 判断是否大于2日的假期，因为大于2日的假期，最后一天晚上交易所下班了
+        count = 0
+        while count < 3:
+            date = date + datetime.timedelta(days=1)
+            if is_workday(date) is True:
+                break
+            if count == 2:
+                isTorrowLongHoildayBegin = True
+            count = count + 1
+
+    pre = None
+    if security is not None:
+        pre = security[0:2].lower()
+
+    if pre is not None and pre in str_no_night:
+        if hms > s0 and hms < e0:
+            return True
+        if hms > s1 and hms < e1:
+            return True
+        if hms > s2 and hms < e2:
+            return True
+    elif pre is not None and pre in str_no_2330:
+        if hms > s0 and hms < e0:
+            return True
+        if hms > s1 and hms < e1:
+            return True
+        if hms > s2 and hms < e2:
+            return True
+        if hms > s3 and hms < '23:00:00' and isTorrowLongHoildayBegin is False:
+            return True
+    else:
+        if hms > s0 and hms < e0:
+            return True
+        if hms > s1 and hms < e1:
+            return True
+        if hms > s2 and hms < e2:
+            return True
+        if hms > s3 and hms < e3 and isTorrowLongHoildayBegin is False:
+            return True
     return False
 
 def getJSONFromFile(filepath):
@@ -484,3 +530,4 @@ def getRate(fromPrice, toPrice):
 # print(isOpen("2018-07-21"))
 # print(os.path.dirname(__file__))
 
+print(shouldClearPositionNow(security='RB8888', nowTimeString='2019-06-05 22:58:45'))
