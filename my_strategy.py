@@ -18,12 +18,13 @@ from functools import reduce
 cond_er = 0.4
 cond_before_er = 0.4
 cond_after_er = 0.6
+adx_timeperiod = 4
 adx_edge = 30
 fast_ema = 6
 slow_ema = 23
-timeArr = util.getTimeSerial(starttime='2019-02-28 22:20:00', count=20000, periodSec=61)
+timeArr = util.getTimeSerial(starttime='2018-07-24 22:20:00', count=2000000, periodSec=61)
 df = None
-security = 'JD8888.XDCE'
+security = 'TA8888.XZCE'
 frequency = '10m'
 msg = {
     'df': df,
@@ -31,9 +32,11 @@ msg = {
     'force_waiting_count': 0,
     'open': 0,
     'clearRates': [],
-    'open_after_next_change': True,
-    'bar_rates': []
+    'tmp_rates_every_step': [],
+    'open_after_next_change': True
 }
+
+
 def getAdvancedData(df, security, frequency, nowTimeString):
     newRow = None
     newIndex = None
@@ -69,11 +72,12 @@ def getAdvancedData(df, security, frequency, nowTimeString):
     df['EMA60'] = talib.EMA(np.array(close), timeperiod=60)
     df['EMAF'] = talib.EMA(np.array(close), timeperiod=fast_ema)
     df['EMAS'] = talib.EMA(np.array(close), timeperiod=slow_ema)
-    df['ADX'] = talib.ADX(np.array(high), np.array(low), np.array(close), timeperiod=6)
+    df['ADX'] = talib.ADX(np.array(high), np.array(low), np.array(close), timeperiod=adx_timeperiod)
     # df['ADX'] = util.adx(highs=np.array(high), lows=np.array(low), closes=np.array(close))
     df.drop([df.index.tolist()[0]], inplace=True)
     # print('---->get_query_count(): ' + str(jqdatasdk.get_query_count()))
     return df
+
 
 def getPricePosiArray(df):
     indexList = df[df.EMA60 == df.EMA60].index.tolist()
@@ -92,6 +96,7 @@ def getPricePosiArray(df):
         pricePositions.append(pricePosi)
     return pricePositions
 
+
 def getVolumeArrows(df):
     indexList = df[df.EMA60 == df.EMA60].index.tolist()
     i = 0
@@ -101,6 +106,7 @@ def getVolumeArrows(df):
         arr.append(count)
         i = i + 1
     return arr
+
 
 def _getVolumeArrow(df, indexList, indexCount):
     if indexCount is not None:
@@ -120,6 +126,7 @@ def _getVolumeArrow(df, indexList, indexCount):
         count = count + 1
     return count
 
+
 def getOpen2CloseRates(df):
     opens = [float(x) for x in df['open']]
     closes = [float(x) for x in df['close']]
@@ -131,6 +138,7 @@ def getOpen2CloseRates(df):
         i = i + 1
         arr.append(rate)
     return arr
+
 
 def getNearMaxClosePrice(df=None, preCount=0):
     pricePositions = getPricePosiArray(df)
@@ -155,6 +163,7 @@ def getNearMaxClosePrice(df=None, preCount=0):
         return maxClose
     return None
 
+
 def getNearMinClosePrice(df=None, preCount=0):
     pricePositions = getPricePosiArray(df)
     indexList = df[df.EMA60 == df.EMA60].index.tolist()
@@ -178,6 +187,7 @@ def getNearMinClosePrice(df=None, preCount=0):
     else:
         return min(closes)
     return None
+
 
 def getNowEarningRate(df, preCount=0):
     pricePositions = getPricePosiArray(df)
@@ -205,6 +215,7 @@ def getNowEarningRate(df, preCount=0):
     else:
         return util.getRate(nowPrice, startPrice)
 
+
 def getDangerRate(df, preCount=0):
     indexList = df[df.EMA60 == df.EMA60].index.tolist()
     if preCount > 0:
@@ -218,6 +229,7 @@ def getDangerRate(df, preCount=0):
         rate = util.getRate(fromPrice=nowPrice, toPrice=minClosePrice)
     return rate
 
+
 def pushPosition(position):
     o = {'available': True, 'position': position, 'createtime': util.getYMDHMS()}
     position_flow = util.getProperty('position_flow')
@@ -228,12 +240,14 @@ def pushPosition(position):
         util.removeProperty('position_flow')
         util.setProperty('position_flow', position_flow)
 
+
 def getNowPosition():
     position_flow = util.getProperty('position_flow')
     if position_flow is None:
         return 0
     else:
         return int(position_flow[-1].get('position'))
+
 
 def isChangeTo(df):
     pps = getPricePosiArray(df)
@@ -246,6 +260,7 @@ def isChangeTo(df):
     else:
         return "STILL"
 
+
 def isChangeToDOWN(df):
     pps = getPricePosiArray(df)
     nowPricePosi = pps[-1]
@@ -254,6 +269,7 @@ def isChangeToDOWN(df):
         return True
     else:
         return False
+
 
 def changeFromNowCount(df):
     pps = getPricePosiArray(df)
@@ -272,22 +288,45 @@ def changeFromNowCount(df):
         i = i - 1
     return count
 
-def loop(security=None, frequency=None, nowTimeString=None, msg=None):
 
+def get_bar_rates(df=None, len=20):
+    bar_rates = []
+    closes = [float(x) for x in df['close']]
+    opens = [float(x) for x in df['open']]
+    i = 0
+    while i < len:
+        rate = util.getRate(fromPrice=opens[-i - 1], toPrice=closes[-i - 1])
+        bar_rates.append(rate)
+        i = i + 1
+    return bar_rates
+
+
+def getATR(df=None, len=20):
+    arr = get_bar_rates(df=df, len=len)
+    return np.mean(arr)
+
+def removeTreses():
+    util.removeProperty('tmp_treses')
+
+def appendTreses(tmp_rates_every_step):
+    tmp_treses = util.getProperty('tmp_treses')
+    if tmp_treses is not None:
+        tmp_treses.append(tmp_rates_every_step)
+    else:
+        tmp_treses = [tmp_rates_every_step]
+    util.setProperty('tmp_treses', tmp_treses)
+
+def loop(security=None, frequency=None, nowTimeString=None, msg=None):
     df = msg.get('df')
     position = msg.get('position')
     force_waiting_count = msg.get('force_waiting_count')
     open = msg.get('open')
     clearRates = msg.get('clearRates')
+    tmp_rates_every_step = msg.get('tmp_rates_every_step')
     open_after_next_change = msg.get('open_after_next_change')
-    bar_rates = msg.get('bar_rates')
-
     df = getAdvancedData(df, security=security, frequency=frequency, nowTimeString=nowTimeString)
-
+    # atr = getATR(df=df, len=20)
     closes = [float(x) for x in df['close']]
-    opens = [float(x) for x in df['open']]
-    bar_rate = util.getRate(fromPrice=opens[-1], toPrice=closes[-1])
-    bar_rates.append(bar_rate)
     if force_waiting_count > 0:
         force_waiting_count = force_waiting_count - 1
         print(nowTimeString + ": ForceWaiting...")
@@ -297,8 +336,8 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             'force_waiting_count': force_waiting_count,
             'open': open,
             'clearRates': clearRates,
-            'open_after_next_change': open_after_next_change,
-            'bar_rates': bar_rates
+            'tmp_rates_every_step': tmp_rates_every_step,
+            'open_after_next_change': open_after_next_change
         }
 
     status = isChangeTo(df)
@@ -323,6 +362,10 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         ):
             position = 0
             clearRates.append(round((1 + earningRate / 100), 4))
+            tmp_rates_every_step.append(earningRate)
+            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            appendTreses(tmp_rates_every_step)
+            tmp_rates_every_step = []
             print(nowTimeString + ':' + str(closes[-1]) + ' clear Position -> ' + str(earningRate) + ' r:' + str(
                 reduce(lambda x, y: x * y, clearRates)))
             open = 0
@@ -348,10 +391,12 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             if position > 0:
                 print(nowTimeString + ':' + " Still Holding DUO..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
+                tmp_rates_every_step.append(earningRate)
             # 持有空仓
             if position < 0:
                 print(nowTimeString + ':' + " Still Holding KON..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
+                tmp_rates_every_step.append(earningRate)
 
 
     # 瞬间 Down
@@ -360,6 +405,10 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         if position != 0:
             position = 0
             clearRates.append(round((1 + earningRate / 100), 4))
+            tmp_rates_every_step.append(earningRate)
+            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            appendTreses(tmp_rates_every_step)
+            tmp_rates_every_step = []
             print(nowTimeString + ': clear Position ------> ' + str(earningRate) + ' r:' + str(
                 reduce(lambda x, y: x * y, clearRates)))
             if ADXs[-1] < adx_edge: force_waiting_count = 5
@@ -381,6 +430,10 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             clearRates.append(round((1 + earningRate / 100), 4))
             print(nowTimeString + ': clear Position ------> ' + str(earningRate) + ' r:' + str(
                 reduce(lambda x, y: x * y, clearRates)))
+            tmp_rates_every_step.append(earningRate)
+            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            appendTreses(tmp_rates_every_step)
+            tmp_rates_every_step = []
             if ADXs[-1] < adx_edge: force_waiting_count = 5
             open = 0
             if earningRate > 2:
@@ -401,24 +454,29 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         'force_waiting_count': force_waiting_count,
         'open': open,
         'clearRates': clearRates,
-        'open_after_next_change': open_after_next_change,
-        'bar_rates': bar_rates
+        'tmp_rates_every_step': tmp_rates_every_step,
+        'open_after_next_change': open_after_next_change
     }
+
 
 def trade(strategyTemplate):
     pass
+
 
 def action(msg):
     ts = util.string2timestamp(str(nowTimeString))
     frequencyLimitFlag = int(time.strftime('%M', time.localtime(ts))) % int(frequency[0:-1]) == 0
     if frequencyLimitFlag is False:
         return msg
-    if util.isFutureTradingTime(nowTimeString=nowTimeString) is False or util.isFutureCommonTradingTime(security=security,
+    if util.isFutureTradingTime(nowTimeString=nowTimeString) is False or util.isFutureCommonTradingTime(
+            security=security,
             nowTimeString=nowTimeString) is False:
         return msg
     msg = loop(security=security, frequency=frequency, nowTimeString=nowTimeString, msg=msg)
     return msg
 
+
+removeTreses()
 for nowTimeString in timeArr:
     msg = action(msg=msg)
 

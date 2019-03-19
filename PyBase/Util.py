@@ -41,7 +41,8 @@ def setProperty(key, value):
         propertiesObj = {}
     else:
         propertiesObj = json.loads(ctn)
-        del propertiesObj[key]
+        if key in propertiesObj:
+            del propertiesObj[key]
     propertiesObj.setdefault(key, value)
     ctn = json.dumps(propertiesObj)
     f = open('properties.txt', 'w')
@@ -114,13 +115,13 @@ def shouldResetPositionNow(security=None):
 
 # 公用期货日内交易时间
 def isFutureCommonTradingTime(nowTimeString=None, security=None):
-    s0 = '09:05:00'
+    s0 = '09:00:00'
     e0 = '10:15:00'
     s1 = '10:30:00'
     e1 = '11:30:00'
-    s2 = '13:35:00'
+    s2 = '13:30:00'
     e2 = '15:00:00'
-    s3 = '21:05:00'
+    s3 = '21:00:00'
     e3 = '23:30:00'
     hms = nowTimeString
     date = None
@@ -338,7 +339,7 @@ def nextOpenDate(date, rightCount=1):
 def getRate(fromPrice, toPrice):
     fromPrice = float(fromPrice)
     toPrice = float(toPrice)
-    rate = round(round(((toPrice - fromPrice) / fromPrice), 4) * 100, 2)
+    rate = round(round(((toPrice - fromPrice) / fromPrice), 4) * 100, 4)
     return rate
 
 
