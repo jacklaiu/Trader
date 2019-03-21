@@ -18,13 +18,11 @@ from functools import reduce
 cond_er = 0.8
 cond_before_er = 0.8
 cond_after_er = 1.2
-rate_trade_edge = 0.2 # 大于这个幅度，正式开仓
-adx_timeperiod = 6
+adx_timeperiod = 4
 adx_edge = 30
 fast_ema = 6
 slow_ema = 11
-# timeArr = util.getTimeSerial(starttime='2018-09-03 22:20:00', count=20000, periodSec=61)
-timeArr = util.getTimeSerial(starttime='2018-11-06 22:20:00', count=200000, periodSec=61)
+timeArr = util.getTimeSerial(starttime='2018-11-06 09:20:00', count=2000000, periodSec=61)
 df = None
 security = 'SC8888.XINE'
 frequency = '30m'
@@ -35,7 +33,7 @@ msg = {
     'open': 0,
     'clearRates': [],
     'tmp_rates_every_step': [],
-    'open_after_next_change': True
+    'open_after_next_change': False
 }
 def getAdvancedData(df, security, frequency, nowTimeString):
     newRow = None
@@ -108,7 +106,7 @@ def getVolumeArrows(df):
     return arr
 
 
-def _getVolumeArrow(df, indexList, indexCount=-2):
+def _getVolumeArrow(df, indexList, indexCount):
     if indexCount is not None:
         indexList = indexList[0:indexCount + 1]
     volumes = []
@@ -321,12 +319,10 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
     position = msg.get('position')
     force_waiting_count = msg.get('force_waiting_count')
     open = msg.get('open')
-    position_open = msg.get('position_open')
     clearRates = msg.get('clearRates')
     tmp_rates_every_step = msg.get('tmp_rates_every_step')
     open_after_next_change = msg.get('open_after_next_change')
     df = getAdvancedData(df, security=security, frequency=frequency, nowTimeString=nowTimeString)
-
     # atr = getATR(df=df, len=20)
     closes = [float(x) for x in df['close']]
     if force_waiting_count > 0:
@@ -337,7 +333,6 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
             'position': position,
             'force_waiting_count': force_waiting_count,
             'open': open,
-            'position_open': position_open,
             'clearRates': clearRates,
             'tmp_rates_every_step': tmp_rates_every_step,
             'open_after_next_change': open_after_next_change
@@ -356,53 +351,41 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         else:
             earningRate = util.getRate(closes[-1], open)
 
-
     # 趋势持续
     if status == 'STILL':
-        cb_er = cond_before_er
-        cf_er = cond_after_er
         # 止损止盈平仓
         if position != 0 and (
-                (earningRate <= cond_er and dangerRate < -cb_er) or
-                (earningRate > cond_er and dangerRate < -cf_er)
+                (earningRate <= cond_er and dangerRate < -cond_before_er) or
+                (earningRate > cond_er and dangerRate < -cond_after_er)
         ):
-            if position_open is None or position_open == 0:
-                clearRates.append(1)
-                print(nowTimeString + ': [止损止盈平仓] clear Position ------> ' + str(0) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
-            else:
-                closes = closes[-200:]
-                nowClose = closes[-1]
-                if position > 0:
-                    real_EarningRate = util.getRate(fromPrice=position_open, toPrice=nowClose)
-                else:
-                    real_EarningRate = util.getRate(fromPrice=nowClose, toPrice=position_open)
-                clearRates.append(round((1 + real_EarningRate / 100), 4))
-                print(nowTimeString + ': clear Position ------> ' + str(real_EarningRate) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
+            position = 0
+            clearRates.append(round((1 + earningRate / 100), 4))
             tmp_rates_every_step.append(earningRate)
-            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            #print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
             appendTreses(tmp_rates_every_step)
             tmp_rates_every_step = []
+            print(nowTimeString + ':' + str(closes[-1]) + ' 止损止盈平仓 ### ### ### ### ### ### ### ### ### ### ### ### clear Position -> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
             open = 0
-            position_open = 0
+            # open_after_next_change = True
             open_after_next_change = False
-            position = 0
             # pushPosition(0)
         else:
-            # 高位回落卖出后再此处等待，或瞬间变化时ADX条件不符合正在等待机会
+            # 高位回落平仓后再此处等待，或瞬间变化时ADX条件不符合正在等待机会
             if position == 0:
-                if open_after_next_change is not True:
+                if open_after_next_change is False:
                     # 等到adx条件符合，开空仓
                     if pricePosi == 1 and (ADXs[-1] > adx_edge):
-                        print(nowTimeString + ':' + str(closes[-1]) + ' Down Position' + ' adx:' + str(ADXs[-1]))
+                        print(nowTimeString + ':' + str(closes[-1]) + ' 平仓后再此处等待 adx条件符合，开空仓 ### ### ### ### ### ### ### ### ### ### ### ### Down Position' + ' adx:' + str(ADXs[-1]))
                         position = -1
                         open = closes[-1]
+                        dangerRate = 0
                     # 等到adx条件符合，开多仓
                     if pricePosi == 0 and (ADXs[-1] > adx_edge):
-                        print(nowTimeString + ':' + str(closes[-1]) + ' Up Position' + ' adx:' + str(ADXs[-1]))
+                        print(nowTimeString + ':' + str(closes[-1]) + ' 平仓后再此处等待 adx条件符合，开多仓 ### ### ### ### ### ### ### ### ### ### ### ### Up Position' + ' adx:' + str(ADXs[-1]))
                         position = 1
                         open = closes[-1]
+                        dangerRate = 0
                 else:
                     print(nowTimeString + ':' + " WAITING..." + ' adx: ' + str(ADXs[-1]))
             # 持有多仓
@@ -410,53 +393,31 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
                 print(nowTimeString + ':' + " Still Holding DUO..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
                 tmp_rates_every_step.append(earningRate)
-                #正式开仓------------------------------------------
-                if earningRate > rate_trade_edge and (position_open is None or position_open == 0):
-                    print('#正式开仓------------------------------------------ ' + str(closes[-1]))
-                    position_open = closes[-1]
             # 持有空仓
             if position < 0:
                 print(nowTimeString + ':' + " Still Holding KON..." + " dr:" + str(dangerRate) + ' er:' + str(
                     earningRate) + ' adx:' + str(ADXs[-1]))
                 tmp_rates_every_step.append(earningRate)
-                #正式开仓------------------------------------------
-                if earningRate > rate_trade_edge and (position_open is None or position_open == 0):
-                    print('#正式开仓------------------------------------------ ' + str(closes[-1]))
-                    position_open = closes[-1]
 
 
     # 瞬间 Down
     elif status == 'DOWN':
         # 前个趋势还在持仓，而现在趋势反转，应该反手做空
         if position != 0:
-            if position_open is None or position_open == 0:
-                clearRates.append(1)
-                print(nowTimeString + ': clear Position ------> ' + str(0) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
-            else:
-                closes = closes[-200:]
-                nowClose = closes[-1]
-                if position > 0:
-                    real_EarningRate = util.getRate(fromPrice=position_open, toPrice=nowClose)
-                else:
-                    real_EarningRate = util.getRate(fromPrice=nowClose, toPrice=position_open)
-                clearRates.append(round((1 + real_EarningRate / 100), 4))
-                print(nowTimeString + ': clear Position ------> ' + str(real_EarningRate) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
-
+            position = 0
+            clearRates.append(round((1 + earningRate / 100), 4))
             tmp_rates_every_step.append(earningRate)
-            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            #print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
             appendTreses(tmp_rates_every_step)
             tmp_rates_every_step = []
+            print(nowTimeString + ': 趋势反转 ### ### ### ### ### ### ### ### ### ### ### ### clear Position ------> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
             if ADXs[-1] < adx_edge: force_waiting_count = 5
             open = 0
-            position_open = 0
-            position = 0
-
         # -------------------------------------------------------------------
         # 变为Down瞬间，adx也符合要求，开空仓
         elif (ADXs[-1] > adx_edge and cfn_count < 10) and position == 0:
-            print(nowTimeString + ':' + str(closes[-1]) + ' Down Position' + ' adx:' + str(ADXs[-1]))
+            print(nowTimeString + ':' + str(closes[-1]) + ' 变为Down瞬间，adx也符合要求，开空仓 ### ### ### ### ### ### ### ### ### ### ### ### Down Position' + ' adx:' + str(ADXs[-1]))
             position = -1
             open = closes[-1]
         # pushPosition(1)
@@ -466,33 +427,22 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
     elif status == 'UP':
         # 前个趋势还在持仓，而现在趋势反转，应该反手做多
         if position != 0:
-            if position_open is None or position_open == 0:
-                clearRates.append(1)
-                print(nowTimeString + ': clear Position ------> ' + str(0) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
-            else:
-                closes = closes[-200:]
-                nowClose = closes[-1]
-                if position > 0:
-                    real_EarningRate = util.getRate(fromPrice=position_open, toPrice=nowClose)
-                else:
-                    real_EarningRate = util.getRate(fromPrice=nowClose, toPrice=position_open)
-                clearRates.append(round((1 + real_EarningRate / 100), 4))
-                print(nowTimeString + ': clear Position ------> ' + str(real_EarningRate) + ' r:' + str(
-                    reduce(lambda x, y: x * y, clearRates)))
-
+            position = 0
+            clearRates.append(round((1 + earningRate / 100), 4))
+            print(nowTimeString + ': 趋势反转 ### ### ### ### ### ### ### ### ### ### ### ### clear Position ------> ' + str(earningRate) + ' r:' + str(
+                reduce(lambda x, y: x * y, clearRates)))
             tmp_rates_every_step.append(earningRate)
-            print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
+            #print(str(tmp_rates_every_step.__len__()) + '@@@@@@@@@@tmp_rates_every_step: ' + str(tmp_rates_every_step))
             appendTreses(tmp_rates_every_step)
             tmp_rates_every_step = []
             if ADXs[-1] < adx_edge: force_waiting_count = 5
             open = 0
-            position_open = 0
-            position = 0
+            if earningRate > 2:
+                print()
         # -------------------------------------------------------------------
         # 变为Up瞬间，adx也符合要求，开多仓
         elif (ADXs[-1] > adx_edge and cfn_count < 10) and position == 0:
-            print(nowTimeString + ':' + str(closes[-1]) + ' Up Position' + ' adx:' + str(ADXs[-1]))
+            print(nowTimeString + ':' + str(closes[-1]) + ' 变为Up瞬间，adx也符合要求，开多仓 ### ### ### ### ### ### ### ### ### ### ### ### Up Position' + ' adx:' + str(ADXs[-1]))
             position = 1
             open = closes[-1]
         open_after_next_change = False
@@ -504,7 +454,6 @@ def loop(security=None, frequency=None, nowTimeString=None, msg=None):
         'position': position,
         'force_waiting_count': force_waiting_count,
         'open': open,
-        'position_open': position_open,
         'clearRates': clearRates,
         'tmp_rates_every_step': tmp_rates_every_step,
         'open_after_next_change': open_after_next_change
@@ -515,7 +464,7 @@ def trade(strategyTemplate):
     pass
 
 
-def action(msg=None, nowTimeString=None):
+def action(msg):
     ts = util.string2timestamp(str(nowTimeString))
     frequencyLimitFlag = int(time.strftime('%M', time.localtime(ts))) % int(frequency[0:-1]) == 0
     if frequencyLimitFlag is False:
@@ -529,10 +478,8 @@ def action(msg=None, nowTimeString=None):
 
 
 removeTreses()
-jqdatasdk.auth('13824472562', '472562')
-print(jqdatasdk.get_query_count())
 for nowTimeString in timeArr:
-    msg = action(msg=msg, nowTimeString=nowTimeString)
+    msg = action(msg=msg)
 
 #
 # class MyStrategy(CtaTemplate):
