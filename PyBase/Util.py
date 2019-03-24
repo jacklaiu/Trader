@@ -4,7 +4,6 @@ import time
 import json
 import jqdatasdk
 import datetime
-from chinese_calendar import is_workday #, is_holiday
 
 #没有夜盘
 str_no_night = 'jd_ap_v8_v9_sm_sf_l9_l8'
