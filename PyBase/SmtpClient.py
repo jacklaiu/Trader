@@ -11,3 +11,4 @@ def sendEmail(subject, content, receivers='jacklaiu@163.com'):
     if enable is False: return
     url = 'http://107.182.31.161:64210/smtpclient/sendHtml?subject='+subject+'&content='+content+'&receivers='+receivers
     requests.get(url)
+
